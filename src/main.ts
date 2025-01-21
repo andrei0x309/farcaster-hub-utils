@@ -11,13 +11,14 @@ import {
 	ReactionType,
 	makeReactionAdd,
 	makeReactionRemove,
+	makeFrameAction,
 } from '@farcaster/hub-nodejs';
 
 const FC_TIMESTMAP_OFFSET = 1609459200
 
 class FCHubUtils {
 	private PK: string;
-	private HUB_URL: string = "hub.pinata.cloud";
+	private HUB_URL: string = "hub-grpc.pinata.cloud";
 	private HUB_USER: string = "";
 	private HUB_PASS: string = "";
 	private signer: NobleEd25519Signer;
@@ -51,10 +52,15 @@ class FCHubUtils {
 		this.PK = PK;
 		this.fid = fid;
 		this.signer = new NobleEd25519Signer(Buffer.from(this.PK.replace('0x', ''), 'hex'));
-		this.hubClient = getSSLHubRpcClient(this.HUB_URL);
+		this.hubClient = getSSLHubRpcClient(this.HUB_URL, {
+			"grpc.max_send_message_length":  719e6,
+			"grpc.max_receive_message_length": 719e6
+		})
+		// console.log('ss', Object.getOwnPropertySymbols(this.hubClient))
+		// console.log('ss', this.hubClient)
 		this.hubClientAuthMetadata = getAuthMetadata(this.HUB_USER, this.HUB_PASS);
 	}
- 
+
 	changeSigner = (PK: string) => {
 		try {
 			this.signer = new NobleEd25519Signer(Buffer.from(PK.replace('0x', ''), 'hex'));
@@ -66,7 +72,7 @@ class FCHubUtils {
 		}
 	}
 
-	 changeHub = async ({
+	changeHub = async ({
 		HUB_URL,
 		HUB_USER,
 		HUB_PASS,
@@ -96,7 +102,10 @@ class FCHubUtils {
 			}
 			await this.hubClient.close()
 			this.HUB_URL = HUB_URL;
-			this.hubClient = getSSLHubRpcClient(this.HUB_URL);
+			this.hubClient = getSSLHubRpcClient(this.HUB_URL, {
+				"grpc-node.max_receive_message_length": 419e4,
+				"grpc-node.max_send_message_length": 419e4
+			})
 			this.hubClientAuthMetadata = getAuthMetadata(this.HUB_USER, this.HUB_PASS);
 			return true
 		} catch (e) {
@@ -215,7 +224,7 @@ class FCHubUtils {
 	createFarcasterPost = async ({
 		media = [] as Array<{ farcaster: string }>,
 		content = '',
-		replyTo = undefined as { hash: string; fid: string } | undefined,
+		replyTo = undefined as { hash: string; fid: string } | string | undefined,
 	}) => {
 		const text = content
 
@@ -240,7 +249,7 @@ class FCHubUtils {
 		}
 
 		if (media) {
-			publishContent.embeds = media.slice(0, 2).map(m => ({ url: m.farcaster }))
+			publishContent.embeds = media.map(m => ({ url: m.farcaster }))
 		}
 
 		publishContent.embeds = publishContent.embeds.concat(this.parseEmbeds(text)).slice(0, 2)
@@ -250,19 +259,19 @@ class FCHubUtils {
 		publishContent.mentionsPositions = mentionsPositions
 		publishContent.text = mentionsText
 
-		if (replyTo?.hash) {
-			const hash = replyTo.hash.startsWith('0x') ? replyTo.hash.slice(2) : replyTo.hash
+		if ((replyTo as { hash: string, fid: string })?.hash) {
+			const hash = (replyTo as { hash: string, fid: string }).hash.startsWith('0x') ? (replyTo as { hash: string, fid: string }).hash.slice(2) : (replyTo as { hash: string, fid: string }).hash
 			publishContent.parentCastId = {
-				fid: Number(replyTo.fid),
+				fid: Number((replyTo as { hash: string, fid: string }).fid),
 				hash: Buffer.from(hash, 'hex')
 			}
-		} else {
+		} else if (typeof replyTo === 'string') {
 			publishContent.parentUrl = String(replyTo)
 		}
 
 		const hash = await this.publishCast(publishContent)
 
-		return hash
+		return Buffer.from(hash).toString('hex')
 	}
 
 	createCast = async ({
@@ -279,6 +288,10 @@ class FCHubUtils {
 
 	deleteCast = async (hash: string) => {
 		try {
+			if (hash.startsWith('0x')) {
+				hash = hash.slice(2)
+			}
+
 			const deleteCastMessage = await makeCastRemove({
 				targetHash: Buffer.from(hash, 'hex'),
 			}, {
@@ -380,6 +393,10 @@ class FCHubUtils {
 	addReaction = async (hash: string, fid: number, reactionType: ReactionType) => {
 		try {
 
+			if (hash.startsWith('0x')) {
+				hash = hash.slice(2)
+			}
+
 			const reactionMessage = await makeReactionAdd({
 				targetCastId: {
 					fid,
@@ -407,6 +424,10 @@ class FCHubUtils {
 
 	removeReaction = async (hash: string, fid: number, reactionType: ReactionType) => {
 		try {
+
+			if (hash.startsWith('0x')) {
+				hash = hash.slice(2)
+			}
 
 			const reactionMessage = await makeReactionRemove({
 				targetCastId: {
@@ -447,6 +468,275 @@ class FCHubUtils {
 
 	removeRecast = async (hash: string, fid: number) => {
 		return await this.removeReaction(hash, fid, ReactionType.RECAST)
+	}
+
+	getFidReactions = async ({
+		fid,
+		limitPerRequest = 10,
+		newestFirst = true,
+		fromTimestamp = Date.now(),
+		toTimestamp = 0
+	}: {
+		fid: number,
+		limitPerRequest?: number,
+		newestFirst?: boolean,
+		fromTimestamp?: number,
+		toTimestamp?: number,
+	}) => {
+		try {
+
+			if (limitPerRequest > 100) {
+				limitPerRequest = 100
+				console.warn(`Limit was set to max value of 100`)
+			}
+
+			if (toTimestamp && fromTimestamp < toTimestamp) {
+				throw new Error('Invalid timestamp range, fromTimestamp must be greater than toTimestamp')
+			}
+
+			if (fromTimestamp > Date.now()) {
+				throw new Error('Invalid fromTimestamp value, must be less or equal to current time')
+			}
+
+			fromTimestamp = fromTimestamp / 1000
+			fromTimestamp = Math.trunc(fromTimestamp - FC_TIMESTMAP_OFFSET)
+			toTimestamp = toTimestamp / 1000
+			if (toTimestamp - FC_TIMESTMAP_OFFSET > 0) {
+				toTimestamp = Math.trunc(toTimestamp - FC_TIMESTMAP_OFFSET)
+			}
+
+			const reactions = await this.hubClient.getAllReactionMessagesByFid({
+				fid,
+				pageSize: limitPerRequest,
+				reverse: newestFirst,
+				startTimestamp: toTimestamp,
+				stopTimestamp: fromTimestamp
+			})
+
+			if (!reactions.isOk()) {
+				throw new Error(reactions._unsafeUnwrapErr().toString())
+			}
+
+			const mapReactions = reactions._unsafeUnwrap().messages.map((m: Message) => {
+				return {
+					hash: Buffer.from(m.hash).toString('hex'),
+					fid: m.data?.fid,
+					reaction: {
+						type: m.data?.reactionBody?.type,
+						targetCastId: m.data?.reactionBody?.targetCastId,
+						targetUrl: m.data?.reactionBody?.targetUrl
+					},
+					timestamp: (m.data?.timestamp ?? 0) * 1000 + FC_TIMESTMAP_OFFSET * 1000
+				}
+			})
+
+			return {
+				reactions: mapReactions
+			}
+
+		} catch (e) {
+			console.error(`Failed to get reactions for fid=${fid} err=${e}`)
+			return null
+		}
+	}
+
+	getReationsByFidByType = async ({
+		fid,
+		limitPerRequest = 10,
+		newestFirst = true,
+		fromTimestamp = Date.now(),
+		toTimestamp = 0,
+		type = ReactionType.LIKE
+	}: {
+		fid: number,
+		limitPerRequest?: number,
+		newestFirst?: boolean,
+		fromTimestamp?: number,
+		toTimestamp?: number,
+		type?: ReactionType
+	}) => {
+		let reactions = []
+		do {
+			const resultReactions = await this.getFidReactions({
+				fid,
+				limitPerRequest,
+				newestFirst,
+				fromTimestamp,
+				toTimestamp
+			})
+			if (!reactions) {
+				break
+			}
+			const likeReactions = resultReactions?.reactions.filter((r) => r.reaction.type === type) || []
+			reactions.push(...likeReactions)
+			const lastTimestamp = likeReactions[likeReactions.length - 1].timestamp
+			if (toTimestamp >= lastTimestamp) {
+				break
+			}
+			fromTimestamp = lastTimestamp
+
+		} while (true)
+		return reactions
+	}
+
+	getLikesByFid = async ({
+		fid,
+		limitPerRequest = 10,
+		newestFirst = true,
+		fromTimestamp = Date.now(),
+		toTimestamp = 0
+	}: {
+		fid: number,
+		limitPerRequest?: number,
+		newestFirst?: boolean,
+		fromTimestamp?: number,
+		toTimestamp?: number,
+	}) => {
+		return await this.getReationsByFidByType({
+			fid,
+			limitPerRequest,
+			newestFirst,
+			fromTimestamp,
+			toTimestamp,
+			type: ReactionType.LIKE
+		})
+	}
+
+	getRecastsByFid = async ({
+		fid,
+		limitPerRequest = 10,
+		newestFirst = true,
+		fromTimestamp = Date.now(),
+		toTimestamp = 0
+	}: {
+		fid: number,
+		limitPerRequest?: number,
+		newestFirst?: boolean,
+		fromTimestamp?: number,
+		toTimestamp?: number,
+	}) => {
+		return await this.getReationsByFidByType({
+			fid,
+			limitPerRequest,
+			newestFirst,
+			fromTimestamp,
+			toTimestamp,
+			type: ReactionType.RECAST
+		})
+	}
+
+	getFrameBody = async ({
+		buttonIndex = 1,
+		castHash = '',
+		url,
+		inputText = '',
+		address = '',
+		fid,
+		state = ''
+	}: {
+		buttonIndex?: number,
+		castHash?: string,
+		url: string,
+		inputText?: string,
+		address?: string,
+		fid: number | string
+		state?: string
+	}) => {
+		try {
+			castHash = castHash?.replace('0x', '') || ''
+			const framePacketData = {
+				url: Buffer.from(url, 'utf8'),
+				buttonIndex: Number(buttonIndex),
+				inputText: Buffer.from(inputText || '', 'utf8'),
+				state: Buffer.from(state || '', 'utf8'),
+				castId: {
+					fid: Number(fid),
+					hash: Buffer.from(castHash, 'hex')
+				},
+				address: Buffer.from(address.replace('0x', ''), 'hex'),
+				transactionId: Buffer.from('', 'hex')
+			}
+
+			const frameBody = await makeFrameAction(framePacketData, {
+				fid: this.fid,
+				network: FarcasterNetwork.MAINNET
+			}, this.signer)
+
+			if (!frameBody.isOk()) {
+				throw new Error(frameBody._unsafeUnwrapErr().toString())
+			}
+
+			return frameBody._unsafeUnwrap()
+		} catch (e) {
+			console.error(`Failed to get frame body for url=${url} err=${e}`)
+			return null
+		}
+	}
+
+	getAllLinksByFid = async ({
+		fid,
+		limitPerRequest = 10,
+		newestFirst = true,
+		fromTimestamp = Date.now(),
+		toTimestamp = 0
+	}: {
+		fid: number,
+		limitPerRequest?: number,
+		newestFirst?: boolean,
+		fromTimestamp?: number,
+		toTimestamp?: number,
+	}) => {
+		try {
+
+			if (limitPerRequest > 100) {
+				limitPerRequest = 100
+				console.warn(`Limit was set to max value of 100`)
+			}
+
+			if (toTimestamp && fromTimestamp < toTimestamp) {
+				throw new Error('Invalid timestamp range, fromTimestamp must be greater than toTimestamp')
+			}
+
+			if (fromTimestamp > Date.now()) {
+				throw new Error('Invalid fromTimestamp value, must be less or equal to current time')
+			}
+
+			fromTimestamp = fromTimestamp / 1000
+			fromTimestamp = Math.trunc(fromTimestamp - FC_TIMESTMAP_OFFSET)
+			toTimestamp = toTimestamp / 1000
+			if (toTimestamp - FC_TIMESTMAP_OFFSET > 0) {
+				toTimestamp = Math.trunc(toTimestamp - FC_TIMESTMAP_OFFSET)
+			}
+
+			const links = await this.hubClient.getAllLinkMessagesByFid({
+				fid,
+				pageSize: limitPerRequest,
+				reverse: newestFirst,
+				startTimestamp: toTimestamp,
+				stopTimestamp: fromTimestamp
+			})
+
+			if (!links.isOk()) {
+				throw new Error(links._unsafeUnwrapErr().toString())
+			}
+
+			const mapLinks = links._unsafeUnwrap().messages.map((m: Message) => {
+				return {
+					hash: Buffer.from(m.hash).toString('hex'),
+					fid: m.data?.fid,
+					link: m.data?.linkBody,
+					timestamp: (m.data?.timestamp ?? 0) * 1000 + FC_TIMESTMAP_OFFSET * 1000
+				}
+			})
+
+			return {
+				links: mapLinks
+			}
+
+		} catch (e) {
+			console.error(`Failed to get links for fid=${fid} err=${e}`)
+			return null
+		}
 	}
 
 }

@@ -36,6 +36,11 @@ fcHubUtils.createFarcasterPost({
 - `addRecast` - Add a recast to a cast
 - `removeRecast` - Remove a recast from a cast
 - `getFidFromUsername` - Get the fid from a username
+- `getCastFromHash` - Get a specific cast by hash and fid
+
+**Note 1:** The `createFarcasterPost` method is an alias for `createCast`
+
+**Note 2:** Also check [Changelog](./CHANGELOG.md) for more methods
 
 #### Internal Methods ( lower level )
 
@@ -45,6 +50,7 @@ fcHubUtils.createFarcasterPost({
 - `parseFarcasterMentions` - Parse mentions from a string as { mentions, mentionsPositions, mentionsText }
 - `addReaction` - Lower level method to add a reaction to a cast
 - `removeReaction` - Lower level method to remove a reaction from a cast
+
 
 ### Changelog
 
