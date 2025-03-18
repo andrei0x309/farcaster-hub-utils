@@ -17,17 +17,19 @@ import {
 const FC_TIMESTMAP_OFFSET = 1609459200
 
 class FCHubUtils {
-	private PK: string;
+	private PK: string = "";
 	private HUB_URL: string = "hub-grpc.pinata.cloud";
 	private HUB_USER: string = "";
 	private HUB_PASS: string = "";
-	private signer: NobleEd25519Signer;
-	private hubClient: ReturnType<typeof getSSLHubRpcClient>;
-	private hubClientAuthMetadata: ReturnType<typeof getAuthMetadata>;
-	private fid: number; // 709233
+	private signer: NobleEd25519Signer = new NobleEd25519Signer(Buffer.from('0x', 'hex'));
+	private hubClient: ReturnType<typeof getSSLHubRpcClient> = {} as any;
+	private hubClientAuthMetadata: ReturnType<typeof getAuthMetadata> = {} as any;
+	private fid: number = 0;
+	private hasAuth: boolean = false;
 
 	constructor(
-		PK: string, fid: number,
+		PK?: string, 
+		fid?: number,
 		HUB_URL?: string,
 		HUB_USER?: string,
 		HUB_PASS?: string,
@@ -49,22 +51,38 @@ class FCHubUtils {
 		if (HUB_PASS) {
 			this.HUB_PASS = HUB_PASS;
 		}
-		this.PK = PK;
-		this.fid = fid;
-		this.signer = new NobleEd25519Signer(Buffer.from(this.PK.replace('0x', ''), 'hex'));
-		this.hubClient = getSSLHubRpcClient(this.HUB_URL, {
-			"grpc.max_send_message_length":  719e6,
-			"grpc.max_receive_message_length": 719e6
-		})
-		// console.log('ss', Object.getOwnPropertySymbols(this.hubClient))
-		// console.log('ss', this.hubClient)
-		this.hubClientAuthMetadata = getAuthMetadata(this.HUB_USER, this.HUB_PASS);
+		if (!PK || !fid) {
+			 this.hasAuth = false;
+		} else {
+			this.PK = PK;
+			this.fid = fid;
+			this.signer = new NobleEd25519Signer(Buffer.from(this.PK.replace('0x', ''), 'hex'));
+		}
+			this.hubClient = getSSLHubRpcClient(this.HUB_URL, {
+				"grpc.max_send_message_length":  719e6,
+				"grpc.max_receive_message_length": 719e6
+			})
+			// console.log('ss', Object.getOwnPropertySymbols(this.hubClient))
+			// console.log('ss', this.hubClient)
+			this.hubClientAuthMetadata = getAuthMetadata(this.HUB_USER, this.HUB_PASS);
 	}
 
-	changeSigner = (PK: string) => {
+	checkSigner = () => {
+		if (!this.hasAuth) {
+			throw new Error('You can\'t publish a cast without authentication, please provide a signer private key and fid, using changeSigner method or constructor')
+		}
+	}
+
+	changeSigner = (PK: string, FID: number) => {
 		try {
+			if (!PK || !FID) {
+				this.hasAuth = false;
+				return false
+			}
 			this.signer = new NobleEd25519Signer(Buffer.from(PK.replace('0x', ''), 'hex'));
 			this.PK = PK;
+			this.fid = FID;
+			this.hasAuth = true;
 			return true
 		} catch (e) {
 			console.error(`Failed to change signer to PK=${PK} err=${e}`)
@@ -173,6 +191,8 @@ class FCHubUtils {
 		if (!cast.isOk()) {
 			throw new Error(cast._unsafeUnwrapErr().toString())
 		}
+
+		this.checkSigner()
 
 		const castMessage = await this.hubClient.submitMessage(cast._unsafeUnwrap(), this.hubClientAuthMetadata)
 
@@ -305,6 +325,8 @@ class FCHubUtils {
 				return false
 			}
 
+			this.checkSigner()
+
 			const deleteCastResponse = await this.hubClient.submitMessage(deleteCastMessage._unsafeUnwrap(), this.hubClientAuthMetadata)
 
 			if (!deleteCastResponse.isOk()) {
@@ -408,6 +430,8 @@ class FCHubUtils {
 				network: FarcasterNetwork.MAINNET
 			}, this.signer)
 
+			this.checkSigner()
+
 			const submitReactionMessage = await this.hubClient.submitMessage(reactionMessage._unsafeUnwrap(), this.hubClientAuthMetadata)
 			if (!submitReactionMessage.isOk()) {
 				const hubError = reactionMessage._unsafeUnwrapErr().toString()
@@ -439,6 +463,8 @@ class FCHubUtils {
 				fid: this.fid,
 				network: FarcasterNetwork.MAINNET
 			}, this.signer)
+
+			this.checkSigner()
 
 			const submitReactionMessage = await this.hubClient.submitMessage(reactionMessage._unsafeUnwrap(), this.hubClientAuthMetadata)
 			if (!submitReactionMessage.isOk()) {
@@ -735,6 +761,42 @@ class FCHubUtils {
 
 		} catch (e) {
 			console.error(`Failed to get links for fid=${fid} err=${e}`)
+			return null
+		}
+	}
+
+	getConnectedAddresses = async ({fid} : {fid: number}) => {
+		try {
+			const address = await this.hubClient.getAllVerificationMessagesByFid({
+				fid,
+				pageSize: 50,
+				reverse: true,
+			})
+
+			if (!address.isOk()) {
+				throw new Error(address._unsafeUnwrapErr().toString())
+			}
+
+			return address._unsafeUnwrap().messages.map((m: Message) => {
+
+				let address: string | null = Buffer.from(m.data?.verificationAddAddressBody?.address || '0x').toString('hex')
+				if (address.length !== 40) {
+					address = null
+				} else {
+					address = '0x' + address
+				}
+
+				return {
+					hash: Buffer.from(m.hash).toString('hex'),
+					fid: m.data?.fid,
+					verificationAddress: '0x' + Buffer.from(m.data?.verificationAddAddressBody?.address || '0x').toString('hex'),
+					verificationType: m.data?.verificationAddAddressBody?.verificationType,
+					VerificationChainId: m.data?.verificationAddAddressBody?.chainId,
+					timestamp: (m.data?.timestamp ?? 0) * 1000 + FC_TIMESTMAP_OFFSET * 1000
+				}
+			})
+		} catch (e) {
+			console.error(`Failed to get connected address for fid=${fid} err=${e}`)
 			return null
 		}
 	}

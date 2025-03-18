@@ -1,3 +1,8 @@
+### 0.1.11
+
+- added `getConnectedAddresses` to get the the last 50 verified addresses
+- made PK and FID optional in case you don't want to perform write actions
+
 ### 0.1.10
 
 - breaking change: `createCast` now returns the cast hash in string format

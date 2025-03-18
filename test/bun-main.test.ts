@@ -23,7 +23,7 @@ const testEnabled = {
     "getFidFromUsername": false,
     "createFarcasterPost": false,
     "createCast": false,
-    "removeCast": true,
+    "removeCast": false,
     "getCastsFromFid": false,
     "testChangeHub": false,
     "testChangeSigner": false,
@@ -31,7 +31,8 @@ const testEnabled = {
     "testCastInNonExistentChannel": false,
     "testCastWithAllMediaInOneURL": false,
     "testPublicHub": false,
-    "calculateFollowingsByfid": false
+    "calculateFollowingsByfid": false,
+    "checkVerifiedAddr": true
 }
 
 testOrSkip = testEnabled.getFidFromUsername ? test : test.skip;
@@ -96,7 +97,7 @@ testOrSkip("Test change hub", async () => {
 testOrSkip = testEnabled.testChangeSigner ? test : test.skip;
 testOrSkip("Test change signer", async () => {
     const hubUtils = new FCHubUtils(SIGNER_KEY as string, FID, HUB_URL, HUB_USER, HUB_PASS);
-    await hubUtils.changeSigner(SIGNER_KEY2 as string);
+    await hubUtils.changeSigner(SIGNER_KEY2 as string, FID2);
     expect(await hubUtils.getFidFromUsername("yuptester")).toBe(FID2);
 });
 
@@ -171,6 +172,19 @@ testOrSkip("Calculate followings by fid", async () => {
     })
     console.log(followings);
     expect(followings).toBeDefined();
+}, {
+    timeout: 20000
+})
+
+
+testOrSkip = testEnabled.checkVerifiedAddr ? test : test.skip;
+testOrSkip("Check last verified addresses", async () => {
+    const hubutils = new FCHubUtils()
+    const connectedAddresses = await hubutils.getConnectedAddresses({
+        fid: 1791
+    })
+    console.log(connectedAddresses);
+    expect(connectedAddresses).toBeDefined();
 }, {
     timeout: 20000
 })
