@@ -1,6 +1,6 @@
 {
   "name": "farcaster-hub-utils",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Class to use a signer key for doing hub actions.",
   "repository": "https://github.com/andrei0x309/farcaster-hub-utils",
   "author": "Andrei O",
