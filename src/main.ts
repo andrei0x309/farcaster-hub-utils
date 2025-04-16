@@ -12,10 +12,12 @@ import {
 	makeReactionAdd,
 	makeReactionRemove,
 	makeFrameAction,
+	makeLinkAdd,
+	makeLinkRemove,
 } from '@farcaster/hub-nodejs';
 
 const FC_TIMESTMAP_OFFSET = 1609459200
-
+type LinkType = 'follow'
 class FCHubUtils {
 	private PK: string = "";
 	private HUB_URL: string = "hub-grpc.pinata.cloud";
@@ -446,6 +448,56 @@ class FCHubUtils {
 		}
 	}
 
+	addLink = async (targetFid: number) => {
+		try {
+
+			this.checkSigner()
+
+			const linkMessage = await makeLinkAdd({
+			    type: 'follow' as LinkType,
+				targetFid,
+			}, {
+				fid: this.fid,
+				network: FarcasterNetwork.MAINNET
+			}, this.signer)
+
+			const submitLinkMessage = await this.hubClient.submitMessage(linkMessage._unsafeUnwrap(), this.hubClientAuthMetadata)
+			if (!submitLinkMessage.isOk()) {
+				const hubError = linkMessage._unsafeUnwrapErr().toString()
+				console.error(`Failed to add link due to network error fid=${targetFid} err=${hubError}`)
+				return false
+			}
+			return true
+		} catch (e) {
+			console.error(`Failed to add link due to network error fid=${targetFid} err=${e}`)
+			return false
+		}
+	}
+
+	removeLink = async (targetFid: number) => {
+		try {
+			this.checkSigner()
+			const linkMessage = await makeLinkRemove({
+				targetFid,
+				type: 'follow' as LinkType,
+			}, {
+				fid: this.fid,
+				network: FarcasterNetwork.MAINNET
+			}, this.signer)
+
+			const submitLinkMessage = await this.hubClient.submitMessage(linkMessage._unsafeUnwrap(), this.hubClientAuthMetadata)
+			if (!submitLinkMessage.isOk()) {
+				const hubError = linkMessage._unsafeUnwrapErr().toString()
+				console.error(`Failed to remove link due to network error fid=${targetFid} err=${hubError}`)
+				return false
+			}
+			return true
+		} catch (e) {
+			console.error(`Failed to remove link due to network error fid=${targetFid} err=${e}`)
+			return false
+		}
+	}
+					
 	removeReaction = async (hash: string, fid: number, reactionType: ReactionType) => {
 		try {
 
@@ -486,6 +538,14 @@ class FCHubUtils {
 
 	removeLike = async (hash: string, fid: number) => {
 		return await this.removeReaction(hash, fid, ReactionType.LIKE)
+	}
+
+	addFollow = async (fid: number) => {
+		return await this.addLink(fid)
+	}
+
+	removeFollow = async (fid: number) => {
+		return await this.removeLink(fid)
 	}
 
 	addRecast = async (hash: string, fid: number) => {

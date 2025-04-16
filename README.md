@@ -1,4 +1,4 @@
-## farcaster-hub-utils - 0.1.9
+## farcaster-hub-utils
 
 Simple library to simplify the interaction with the Farcaster Hub.
 Works with a private an authorized signer key and account fid.
@@ -6,10 +6,10 @@ Works with a private an authorized signer key and account fid.
 ### Basic Usage
 
 ```typescript
-import { FcHubUtils } from 'farcaster-hub-utils';
+import { FCHubUtils } from 'farcaster-hub-utils';
 import { PK, FID, HUB_URL, HUB_USER, HUB_PASS } from './secret';
 
-const fcHubUtils = new FcHubUtils(PK, FID, HUB_URL?, HUB_USER?, HUB_PASS?);
+const fcHubUtils = new FCHubUtils(PK, FID, HUB_URL?, HUB_USER?, HUB_PASS?);
 
 // Invoke some interaction with the hub
 
