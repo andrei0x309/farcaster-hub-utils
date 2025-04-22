@@ -1,5 +1,13 @@
 ## farcaster-hub-utils
 
+## Important
+
+DEPRACTED in favor of [farcaster-snapchain-utils](https://github.com/andrei0x309/farcaster-snapchain-utils)
+
+`farcaster-snapchain-utils` is a rewrite of `farcaster-hub-utils`, even though snapchain and hubs have similar APIs, I took the opportunity to rewrite the library to have better features and documentation.
+
+### Description
+
 Simple library to simplify the interaction with the Farcaster Hub.
 Works with a private an authorized signer key and account fid.
 

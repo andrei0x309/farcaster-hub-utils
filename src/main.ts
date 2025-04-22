@@ -839,7 +839,7 @@ class FCHubUtils {
 
 			return address._unsafeUnwrap().messages.map((m: Message) => {
 
-				let address: string | null = Buffer.from(m.data?.verificationAddAddressBody?.address || '0x').toString('hex')
+				let address: string | null = Buffer.from(m.data?.verificationAddAddressBody?.address || []).toString('hex')
 				if (address.length !== 40) {
 					address = null
 				} else {
@@ -849,7 +849,7 @@ class FCHubUtils {
 				return {
 					hash: Buffer.from(m.hash).toString('hex'),
 					fid: m.data?.fid,
-					verificationAddress: '0x' + Buffer.from(m.data?.verificationAddAddressBody?.address || '0x').toString('hex'),
+					verificationAddress: '0x' + Buffer.from(m.data?.verificationAddAddressBody?.address || []).toString('hex'),
 					verificationType: m.data?.verificationAddAddressBody?.verificationType,
 					VerificationChainId: m.data?.verificationAddAddressBody?.chainId,
 					timestamp: (m.data?.timestamp ?? 0) * 1000 + FC_TIMESTMAP_OFFSET * 1000
